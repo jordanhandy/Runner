@@ -91,7 +91,8 @@ public class MainActivity extends Activity {
             }
             final Intent launch = pm.getLaunchIntentForPackage(app.packageName);
             if (launch != null) {
-                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                // NO_ANIMATION so the apps flashing past is less jarring.
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
                 try {
                     startActivity(launch);
                     woken++;
@@ -104,6 +105,20 @@ public class MainActivity extends Activity {
         // foreground; the rest are throttled once we're backgrounded, though the target
         // process is usually still woken. Upgrade path if a device wakes only one app:
         // run `am start` per package via Shizuku (ADB-privileged, no root).
+
+        // Each launch above brought another app to the front, so Runner is now buried behind
+        // the last one. Reorder our own task back to the front so the user lands on Runner
+        // and can read the result. Runs while we still have the tap's foreground grace.
+        final Intent back = new Intent(this, MainActivity.class);
+        back.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+        try {
+            startActivity(back);
+        } catch (Exception ignored) {
+            // If the OS blocks the return-to-front, we just end on the last app (old behaviour).
+        }
+
         final String msg = "Woke " + woken + " app(s). Now open the Play Store and pull down "
                 + "to refresh to see the updates.";
         status.setText(msg);
