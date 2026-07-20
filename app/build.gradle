@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace 'com.brouken.runner'
-    compileSdk 37
+    compileSdk 35
 
     defaultConfig {
         applicationId "com.brouken.runner"
