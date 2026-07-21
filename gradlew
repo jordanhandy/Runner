@@ -84,6 +84,11 @@ CLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar
 
 
 # Determine the Java command to use to start the JVM.
+if [ -z "$JAVA_HOME" ] && [ "$darwin" = "true" ] && command -v brew >/dev/null 2>&1 ; then
+    JAVA_HOME="$(brew --prefix openjdk@21 2>/dev/null)/libexec/openjdk.jdk/Contents/Home"
+    [ -x "$JAVA_HOME/bin/java" ] || JAVA_HOME=""
+fi
+
 if [ -n "$JAVA_HOME" ] ; then
     if [ -x "$JAVA_HOME/jre/sh/java" ] ; then
         # IBM's JDK on AIX uses strange locations for the executables
