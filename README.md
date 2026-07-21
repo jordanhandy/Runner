@@ -6,14 +6,13 @@ _Runner_ is a small direct-APK utility for Samsung devices running Android (One 
 
 One UI's Deep sleeping apps only run when you open them. Runner cannot read or change One UI's private Deep sleeping apps list, and it cannot confirm that the Play Store will offer an update. It simply gives you a deliberate way to request launches for installed user apps.
 
-Runner builds a queue of user-installed apps with launcher activities. You tap to open one app at a time, then return to Runner for the next. One explicit tap per app avoids Android background-launch restrictions. Apps without launcher activities are reported as unavailable; they cannot be refreshed by opening an activity.
+Runner requests launches for all user-installed apps with launcher activities in one foreground-initiated batch, then immediately brings Runner back to the front. Apps may flash briefly while Android processes the requests. Apps without launcher activities are reported as unavailable; they cannot be refreshed by opening an activity.
 
 ## How to update deep sleeping apps
 
 1. Install Runner's release APK.
-2. Tap **Prepare app queue**.
-3. Tap **Open next app**, return to Runner, and repeat for the apps you want to refresh.
-4. Tap **Open Play Store updates**, then pull down to refresh.
+2. Tap **Open apps for refresh** and remain on Runner while it requests the launches.
+3. Tap **Open Play Store updates**, then pull down to refresh.
 
 One UI, not Runner, controls whether apps return to Deep sleeping apps after you stop using them.
 
