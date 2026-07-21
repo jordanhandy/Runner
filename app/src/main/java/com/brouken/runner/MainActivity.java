@@ -26,8 +26,7 @@ public class MainActivity extends Activity {
     private static final String PLAY_UPDATES = "com.google.android.finsky.VIEW_MY_DOWNLOADS";
 
     private TextView status;
-    private Button queueButton;
-    private AppQueue queue;
+    private Button wakeButton;
     private int unavailableApps;
 
     @Override
@@ -44,17 +43,17 @@ public class MainActivity extends Activity {
 
         addText(root, "Runner", 26, true);
         addText(root,
-                "Runner helps you open installed apps one at a time before checking for "
+                "Runner helps you open installed apps in one batch before checking for "
                         + "updates. One UI does not let other apps read or change its Deep sleeping "
                         + "apps list, so Runner cannot tell which apps are sleeping.",
                 15, false);
 
-        queueButton = new Button(this);
-        queueButton.setText("Prepare app queue");
-        queueButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { handleQueueButton(); }
+        wakeButton = new Button(this);
+        wakeButton.setText("Open apps for refresh");
+        wakeButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { wakeApps(); }
         });
-        root.addView(queueButton);
+        root.addView(wakeButton);
 
         status = new TextView(this);
         status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
@@ -63,9 +62,9 @@ public class MainActivity extends Activity {
 
         addText(root,
                 "How to refresh apps:\n\n"
-                        + "1. Prepare the queue, then tap to open one app.\n"
-                        + "2. Return to Runner and repeat for the apps you want to refresh.\n"
-                        + "3. Open the Play Store and pull down to refresh.\n\n"
+                        + "1. Tap \"Open apps for refresh\". Runner requests every launch, then "
+                        + "returns to this screen.\n"
+                        + "2. Open the Play Store and pull down to refresh.\n\n"
                         + "Runner only records launch requests. One UI manages whether apps are "
                         + "deep sleeping after you stop using them.",
                 15, false);
@@ -83,15 +82,7 @@ public class MainActivity extends Activity {
         return scroller;
     }
 
-    private void handleQueueButton() {
-        if (queue == null) {
-            prepareQueue();
-        } else {
-            openNextApp();
-        }
-    }
-
-    private void prepareQueue() {
+    private void wakeApps() {
         final PackageManager pm = getPackageManager();
         final List<String> packageNames = new ArrayList<>();
         unavailableApps = 0;
@@ -106,44 +97,39 @@ public class MainActivity extends Activity {
                 packageNames.add(app.packageName);
             }
         }
-        queue = new AppQueue(packageNames);
-        updateQueueUi();
+        final int requested = BatchLaunch.requestAll(packageNames, packageName -> launchPackage(pm, packageName));
+        bringRunnerToFront();
+        status.setText("Requested launches for " + requested + " of " + packageNames.size()
+                + " launchable user app(s). " + unavailableApps + " app(s) have no launcher activity.");
+        status.setTextColor(Color.parseColor("#2E7D32"));
     }
 
-    private void openNextApp() {
-        if (!queue.hasNext()) {
-            updateQueueUi();
-            return;
-        }
-        final String packageName = queue.next();
-        final Intent launch = getPackageManager().getLaunchIntentForPackage(packageName);
+    private boolean launchPackage(PackageManager pm, String packageName) {
+        final Intent launch = pm.getLaunchIntentForPackage(packageName);
         if (launch == null) {
             unavailableApps++;
-            updateQueueUi();
-            return;
+            return false;
         }
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
         try {
             startActivity(launch);
+            return true;
         } catch (Exception e) {
             unavailableApps++;
-            Toast.makeText(this, "Runner could not open " + packageName + ".", Toast.LENGTH_LONG).show();
+            return false;
         }
-        updateQueueUi();
     }
 
-    private void updateQueueUi() {
-        if (queue.hasNext()) {
-            final int next = queue.openedCount() + 1;
-            status.setText("Ready to request " + queue.totalCount() + " app launch(es). "
-                    + unavailableApps + " app(s) have no launcher activity.");
-            queueButton.setText("Open next app (" + next + " of " + queue.totalCount() + ")");
-            return;
+    private void bringRunnerToFront() {
+        final Intent back = new Intent(this, MainActivity.class);
+        back.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+        try {
+            startActivity(back);
+        } catch (Exception ignored) {
+            // The batch still completed even if Android keeps the last app in front.
         }
-        status.setText("Requested " + queue.openedCount() + " app launch(es). "
-                + unavailableApps + " app(s) could not be opened. Open Play Store and refresh.");
-        status.setTextColor(Color.parseColor("#2E7D32"));
-        queueButton.setEnabled(false);
-        queueButton.setText("Queue complete");
     }
 
     private void openPlayStore() {
