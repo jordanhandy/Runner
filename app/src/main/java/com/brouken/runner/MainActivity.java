@@ -1,11 +1,11 @@
 package com.brouken.runner;
 
 import android.app.Activity;
+import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
-import android.os.Build;
 import android.os.Bundle;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -17,11 +17,18 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.util.ArrayList;
+import java.util.List;
+
+@SuppressLint("SetTextI18n")
 public class MainActivity extends Activity {
 
     private static final String PLAY_UPDATES = "com.google.android.finsky.VIEW_MY_DOWNLOADS";
 
     private TextView status;
+    private Button queueButton;
+    private AppQueue queue;
+    private int unavailableApps;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -37,17 +44,17 @@ public class MainActivity extends Activity {
 
         addText(root, "Runner", 26, true);
         addText(root,
-                "Samsung puts unused apps into deep sleep, which hides them from the "
-                        + "Play Store so they never get updated. Tap the button below to briefly "
-                        + "wake every Play Store app so updates become available again.",
+                "Runner helps you open installed apps one at a time before checking for "
+                        + "updates. One UI does not let other apps read or change its Deep sleeping "
+                        + "apps list, so Runner cannot tell which apps are sleeping.",
                 15, false);
 
-        final Button wake = new Button(this);
-        wake.setText("Wake sleeping apps");
-        wake.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { wakeApps(); }
+        queueButton = new Button(this);
+        queueButton.setText("Prepare app queue");
+        queueButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { handleQueueButton(); }
         });
-        root.addView(wake);
+        root.addView(queueButton);
 
         status = new TextView(this);
         status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
@@ -55,11 +62,12 @@ public class MainActivity extends Activity {
         root.addView(status);
 
         addText(root,
-                "How to get the updates:\n\n"
-                        + "1. Tap \"Wake sleeping apps\" and let the apps flash past.\n"
-                        + "2. Open the Play Store.\n"
-                        + "3. Tap your profile icon > Manage apps & device.\n"
-                        + "4. Pull down to refresh — updates do NOT appear on their own.",
+                "How to refresh apps:\n\n"
+                        + "1. Prepare the queue, then tap to open one app.\n"
+                        + "2. Return to Runner and repeat for the apps you want to refresh.\n"
+                        + "3. Open the Play Store and pull down to refresh.\n\n"
+                        + "Runner only records launch requests. One UI manages whether apps are "
+                        + "deep sleeping after you stop using them.",
                 15, false);
 
         final Button openStore = new Button(this);
@@ -75,55 +83,67 @@ public class MainActivity extends Activity {
         return scroller;
     }
 
-    private void wakeApps() {
+    private void handleQueueButton() {
+        if (queue == null) {
+            prepareQueue();
+        } else {
+            openNextApp();
+        }
+    }
+
+    private void prepareQueue() {
         final PackageManager pm = getPackageManager();
-        int woken = 0;
+        final List<String> packageNames = new ArrayList<>();
+        unavailableApps = 0;
         for (ApplicationInfo app : pm.getInstalledApplications(0)) {
-            // Skip system apps; they don't deep-sleep and aren't Play Store updatable.
-            if ((app.flags & ApplicationInfo.FLAG_SYSTEM) != 0) {
+            if ((app.flags & ApplicationInfo.FLAG_SYSTEM) != 0
+                    || getPackageName().equals(app.packageName)) {
                 continue;
             }
-            // ponytail: launch every Play-Store app, not just ones we detect as sleeping.
-            // OneUI 6/7 no longer marks deep-sleeping apps as !enabled, so the old detection
-            // woke nothing. Launching an already-awake app is harmless.
-            if (!"com.android.vending".equals(getInstaller(pm, app.packageName))) {
-                continue;
-            }
-            final Intent launch = pm.getLaunchIntentForPackage(app.packageName);
-            if (launch != null) {
-                // NO_ANIMATION so the apps flashing past is less jarring.
-                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
-                try {
-                    startActivity(launch);
-                    woken++;
-                } catch (Exception ignored) {
-                    // One app refusing to launch must not abort the whole run.
-                }
+            if (pm.getLaunchIntentForPackage(app.packageName) == null) {
+                unavailableApps++;
+            } else {
+                packageNames.add(app.packageName);
             }
         }
-        // ponytail: BAL ceiling. On Android 12+ only the first launch fires from the
-        // foreground; the rest are throttled once we're backgrounded, though the target
-        // process is usually still woken. Upgrade path if a device wakes only one app:
-        // run `am start` per package via Shizuku (ADB-privileged, no root).
+        queue = new AppQueue(packageNames);
+        updateQueueUi();
+    }
 
-        // Each launch above brought another app to the front, so Runner is now buried behind
-        // the last one. Reorder our own task back to the front so the user lands on Runner
-        // and can read the result. Runs while we still have the tap's foreground grace.
-        final Intent back = new Intent(this, MainActivity.class);
-        back.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-                | Intent.FLAG_ACTIVITY_SINGLE_TOP
-                | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+    private void openNextApp() {
+        if (!queue.hasNext()) {
+            updateQueueUi();
+            return;
+        }
+        final String packageName = queue.next();
+        final Intent launch = getPackageManager().getLaunchIntentForPackage(packageName);
+        if (launch == null) {
+            unavailableApps++;
+            updateQueueUi();
+            return;
+        }
         try {
-            startActivity(back);
-        } catch (Exception ignored) {
-            // If the OS blocks the return-to-front, we just end on the last app (old behaviour).
+            startActivity(launch);
+        } catch (Exception e) {
+            unavailableApps++;
+            Toast.makeText(this, "Runner could not open " + packageName + ".", Toast.LENGTH_LONG).show();
         }
+        updateQueueUi();
+    }
 
-        final String msg = "Woke " + woken + " app(s). Now open the Play Store and pull down "
-                + "to refresh to see the updates.";
-        status.setText(msg);
+    private void updateQueueUi() {
+        if (queue.hasNext()) {
+            final int next = queue.openedCount() + 1;
+            status.setText("Ready to request " + queue.totalCount() + " app launch(es). "
+                    + unavailableApps + " app(s) have no launcher activity.");
+            queueButton.setText("Open next app (" + next + " of " + queue.totalCount() + ")");
+            return;
+        }
+        status.setText("Requested " + queue.openedCount() + " app launch(es). "
+                + unavailableApps + " app(s) could not be opened. Open Play Store and refresh.");
         status.setTextColor(Color.parseColor("#2E7D32"));
-        Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+        queueButton.setEnabled(false);
+        queueButton.setText("Queue complete");
     }
 
     private void openPlayStore() {
@@ -149,17 +169,5 @@ public class MainActivity extends Activity {
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
-    }
-
-    @SuppressWarnings("deprecation")
-    private static String getInstaller(PackageManager pm, String packageName) {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                return pm.getInstallSourceInfo(packageName).getInstallingPackageName();
-            }
-            return pm.getInstallerPackageName(packageName);
-        } catch (Exception e) {
-            return null;
-        }
     }
 }
