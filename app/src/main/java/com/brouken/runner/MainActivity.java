@@ -1,12 +1,15 @@
 package com.brouken.runner;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -25,6 +28,11 @@ public class MainActivity extends Activity {
 
     private static final String PLAY_UPDATES = "com.google.android.finsky.VIEW_MY_DOWNLOADS";
 
+    // ponytail: 60ms between launches lets window transitions settle; tune per device.
+    private static final long LAUNCH_SPACING_MS = 60;
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
+
     private TextView status;
     private Button wakeButton;
     private int unavailableApps;
@@ -33,6 +41,12 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(buildUi());
+    }
+
+    @Override
+    protected void onDestroy() {
+        handler.removeCallbacksAndMessages(null);
+        super.onDestroy();
     }
 
     private View buildUi() {
@@ -97,11 +111,45 @@ public class MainActivity extends Activity {
                 packageNames.add(app.packageName);
             }
         }
-        final int requested = BatchLaunch.requestAll(packageNames, packageName -> launchPackage(pm, packageName));
-        bringRunnerToFront();
-        status.setText("Requested launches for " + requested + " of " + packageNames.size()
-                + " launchable user app(s). " + unavailableApps + " app(s) have no launcher activity.");
+
+        if (packageNames.isEmpty()) {
+            status.setText("No launchable user apps found. " + unavailableApps
+                    + " app(s) have no launcher activity.");
+            status.setTextColor(Color.parseColor("#2E7D32"));
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Open apps for refresh?")
+                .setMessage("Runner will briefly open " + packageNames.size()
+                        + " installed app(s), then return here. Apps may flash while this runs.")
+                .setPositiveButton("Open apps", (d, w) -> runBatch(pm, packageNames))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void runBatch(PackageManager pm, List<String> packageNames) {
+        wakeButton.setEnabled(false);
         status.setTextColor(Color.parseColor("#2E7D32"));
+        final BatchLaunch batch = new BatchLaunch(packageNames,
+                packageName -> launchPackage(pm, packageName));
+        // Space launches on the main looper so each startActivity() settles and the
+        // UI thread stays responsive, instead of one synchronous loop that ANRs.
+        handler.post(new Runnable() {
+            @Override public void run() {
+                if (batch.hasNext()) {
+                    batch.step();
+                    status.setText("Opening " + batch.position() + " of " + batch.total() + "…");
+                    handler.postDelayed(this, LAUNCH_SPACING_MS);
+                } else {
+                    bringRunnerToFront();
+                    wakeButton.setEnabled(true);
+                    status.setText("Requested launches for " + batch.requested() + " of "
+                            + batch.total() + " launchable user app(s). " + unavailableApps
+                            + " app(s) have no launcher activity.");
+                }
+            }
+        });
     }
 
     private boolean launchPackage(PackageManager pm, String packageName) {

@@ -9,10 +9,19 @@ import org.junit.Test;
 public class BatchLaunchTest {
 
     @Test
-    public void requestsEveryCandidateAndCountsOnlySuccessfulRequests() {
-        int requested = BatchLaunch.requestAll(Arrays.asList("one", "two", "three"),
+    public void steppingEveryCandidateCountsOnlySuccessfulRequests() {
+        BatchLaunch batch = new BatchLaunch(Arrays.asList("one", "two", "three"),
                 packageName -> !"two".equals(packageName));
 
-        assertEquals(2, requested);
+        int steps = 0;
+        while (batch.hasNext()) {
+            batch.step();
+            steps++;
+        }
+
+        assertEquals(3, steps);
+        assertEquals(3, batch.total());
+        assertEquals(3, batch.position());
+        assertEquals(2, batch.requested());
     }
 }
